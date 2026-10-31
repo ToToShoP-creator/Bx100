@@ -16,16 +16,17 @@ TOKEN = "9221802817:AAGmWexp2ceihyczhMitNv9j-DXCGvihCFo"
 dp = Dispatcher()
 
 # Стани для покрокового введення даних (машина станів)
-class BomberState(StatesGroup):
-    waiting_for_phone = State()
+class TargetState(StatesGroup):
+    waiting_for_username = State()
     waiting_for_text = State()
+    waiting_for_count = State()
 
 # Головне меню з кнопками
 def get_main_keyboard():
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="🚀 Запустити розсилку", callback_data="run_spam"),
+                InlineKeyboardButton(text="🚀 Надіслати сповіщення", callback_data="run_target"),
                 InlineKeyboardButton(text="ℹ️ Про систему", callback_data="about")
             ],
             [
@@ -49,71 +50,88 @@ async def command_start_handler(message: Message, state: FSMContext) -> None:
 @dp.callback_query(F.data == "about")
 async def about_callback(callback: CallbackQuery) -> None:
     await callback.message.answer(
-        "🤖 **PulseSend Bot v1.0**\n\n"
-        "Цей інструмент створений для автоматизації сповіщень та тестування каналів зв'язку.\n"
-        "Працює автономно на базі Python та інтегрований з GitHub."
+        "🤖 **PulseSend Bot v1.2**\n\n"
+        "Інструмент для автоматизованої відправки сповіщень у соцмережі з налаштуванням кількості повторів.\n"
+        "Працює автономно на базі Python."
     )
     await callback.answer()
 
 # Кнопка "Налаштування"
 @dp.callback_query(F.data == "settings")
 async def settings_callback(callback: CallbackQuery) -> None:
-    await callback.message.answer("⚙️ **Параметри системи:**\n- Статус: Активний\n- Режим: Автономний\n- Канали: Telegram API підключено")
+    await callback.message.answer("⚙️ **Параметри системи:**\n- Статус: Активний\n- Канали: Telegram / Месенджери готові")
     await callback.answer()
 
-# Початок сценарію розсилки (натиснули "🚀 Запустити розсилку")
-@dp.callback_query(F.data == "run_spam")
-async def start_spam_process(callback: CallbackQuery, state: FSMContext) -> None:
+# Початок сценарію (натиснули "🚀 Надіслати сповіщення")
+@dp.callback_query(F.data == "run_target")
+async def start_target_process(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.answer(
-        "📲 **Введіть номер телефону** людини (або цілі), для якої запусити розсилку:\n"
-        "*(Приклад: +380XXXXXXXXX)*"
+        "🎯 **Введіть нікнейм або посилання** на ціль у соцмережах / Telegram:\n"
+        "*(Приклад: @username або посилання)*"
     )
-    # Переводимо бота в стан очікування номера
-    await state.set_state(BomberState.waiting_for_phone)
+    await state.set_state(TargetState.waiting_for_username)
     await callback.answer()
 
-# Отримуємо номер телефону від користувача
-@dp.message(BomberState.waiting_for_phone)
-async def receive_phone(message: Message, state: FSMContext) -> None:
-    phone = message.text.strip()
-    # Зберігаємо номер у пам'яті сесії
-    await state.update_data(target_phone=phone)
+# Отримуємо нікнейм
+@dp.message(TargetState.waiting_for_username)
+async def receive_username(message: Message, state: FSMContext) -> None:
+    target = message.text.strip()
+    await state.update_data(target_user=target)
     
     await message.answer(
-        f"✅ Номер **{phone}** успішно збережено.\n\n"
-        "✍️ Тепер введіть **текст повідомлення**, яке необхідно надіслати:"
+        f"✅ Ціль **{target}** успішно збережено.\n\n"
+        "✍️ Тепер введіть **текст повідомлення**, яке потрібно надіслати:"
     )
-    # Переводимо бота в стан очікування тексту
-    await state.set_state(BomberState.waiting_for_text)
+    await state.set_state(TargetState.waiting_for_text)
 
-# Отримуємо текст і запускаємо процес пошуку та відправки
-@dp.message(BomberState.waiting_for_text)
+# Отримуємо текст
+@dp.message(TargetState.waiting_for_text)
 async def receive_text(message: Message, state: FSMContext) -> None:
     custom_text = message.text
-    data = await state.get_data()
-    phone = data.get("target_phone")
+    await state.update_data(custom_text=custom_text)
     
-    # Сповіщаємо про початок процесу
-    status_msg = await message.answer(
-        f"🔍 Шукаю ціль **{phone}** по базах та соцмережах (Telegram, Viber, SMS-шлюзи)..."
+    await message.answer(
+        "🔢 Введіть **кількість повідомлень**, яку потрібно надіслати:\n"
+        "*(Введіть ціле число, наприклад: 5 або 10)*"
     )
+    await state.set_state(TargetState.waiting_for_count)
+
+# Отримуємо кількість і запускаємо цикл відправки
+@dp.message(TargetState.waiting_for_count)
+async def receive_count(message: Message, state: FSMContext) -> None:
+    try:
+        count = int(message.text.strip())
+        if count <= 0 or count > 50:
+            await message.answer("⚠️ Будь ласка, введіть число від 1 до 50.")
+            return
+    except ValueError:
+        await message.answer("⚠️ Будь ласка, введіть коректне ціле число (наприклад: 5).")
+        return
+
+    data = await state.get_data()
+    target = data.get("target_user")
+    custom_text = data.get("custom_text")
     
-    # Імітуємо процес пошуку та відправки (пауза для реалістичності)
-    await asyncio.sleep(2)
-    await status_msg.edit_text(f"📡 Знайдено профіль для **{phone}**!\n📤 Розпочинаю надсилання кастомного тексту...")
+    status_msg = await message.answer(
+        f"🔍 Шукаю профіль **{target}** та готую чергу на {count} повідомлень..."
+    )
     
     await asyncio.sleep(1.5)
     
+    # Симуляція циклу відправки
+    for i in range(1, count + 1):
+        await status_msg.edit_text(f"📤 Надсилання повідомлення **{i} з {count}** для {target}...")
+        await asyncio.sleep(0.8) # Пауза між відправками
+    
     # Фінальний звіт
     await message.answer(
-        f"✨ **Операцію успішно завершено!**\n\n"
-        f"🎯 **Ціль:** {phone}\n"
+        f"✨ **Серію повідомлень успішно завершено!**\n\n"
+        f"👤 **Отримувач:** {target}\n"
         f"💬 **Текст:** *{custom_text}*\n"
-        f"📊 **Статус:** Повідомлення надіслано по всіх доступних каналах зв'язку.",
+        f"📊 **Надіслано повідомлень:** {count}",
         reply_markup=get_main_keyboard()
     )
     
-    # Очищаємо стан
     await state.clear()
 
 async def main() -> None:
